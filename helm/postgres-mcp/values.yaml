@@ -1,0 +1,295 @@
+# Default values for postgres-mcp.
+# This chart deploys the PostgreSQL MCP Server over Streamable HTTP transport.
+#
+# Design notes:
+#  * Transport is HTTP (Streamable HTTP is the modern protocol on POST/GET /mcp).
+#  * Stateless mode is the DEFAULT (server.stateless=true) so the Deployment can
+#    scale horizontally — every POST /mcp is independent, no sticky sessions.
+#  * The chart NEVER creates a Secret for credentials. You reference a Secret you
+#    manage yourself via `existingSecret` (mounted with envFrom).
+#  * PDB, HPA and OAuth 2.1 are all supported; PDB/HPA ship disabled — opt in.
+
+# -- Number of replicas when autoscaling is disabled.
+# Safe to raise above 1 because stateless mode carries no per-pod session state.
+replicaCount: 1
+
+image:
+  # -- Container image repository.
+  repository: writenotenow/postgres-mcp
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+  # -- Image tag. Defaults to the chart's appVersion when left empty.
+  tag: ""
+
+# -- Image pull secrets for private registries (list of {name: ...}).
+imagePullSecrets: []
+# -- Override the chart name used in resource names.
+nameOverride: ""
+# -- Override the full release name used in resource names.
+fullnameOverride: ""
+
+# =============================================================================
+# Server / transport configuration
+# =============================================================================
+server:
+  # -- MCP transport. Keep "http" for Kubernetes (Streamable HTTP + Legacy SSE).
+  transport: http
+  # -- HTTP port the server listens on (container port + Service target port).
+  port: 3000
+  # -- Bind address. Must be 0.0.0.0 inside a container so the Service can reach it.
+  host: 0.0.0.0
+  # -- Stateless mode (passes --stateless). DEFAULT true: no sessions/SSE, every
+  # request independent — required for safe horizontal scaling. Set false only
+  # for single-replica session-based deployments.
+  stateless: true
+  # -- Log level: debug | info | notice | warning | error | critical | alert | emergency
+  logLevel: info
+  # -- Tool filter string (POSTGRES_TOOL_FILTER). Controls which of the 25 tool
+  # groups / individual tools are exposed. Examples:
+  #   "codemode"                 -> Code Mode only (recommended, ~90% token savings)
+  #   "core,jsonb,transactions"  -> whitelist specific groups
+  #   "core,+vector,-pg_drop_table" -> group + add/remove tools
+  # Leave empty to expose all 278 tools. See README "Tool Filtering".
+  toolFilter: "codemode"
+  # -- Server instruction verbosity (MCP_INSTRUCTION_LEVEL). Empty = server default.
+  instructionLevel: ""
+  # -- Trust X-Forwarded-For from a reverse proxy / ingress (TRUST_PROXY).
+  # Enable when traffic arrives through an Ingress so client IP / rate limiting work.
+  trustProxy: true
+  # -- Emit HSTS header (MCP_ENABLE_HSTS). Enable when terminating TLS in front.
+  enableHsts: false
+  # -- Per-IP rate limit per 15-minute window (MCP_RATE_LIMIT_MAX). Empty = default (100).
+  rateLimitMax: ""
+  # -- HTTP request timeout in ms for Slowloris protection (MCP_REQUEST_TIMEOUT). Empty = default.
+  requestTimeoutMs: ""
+  # -- HTTP headers timeout in ms (MCP_HEADERS_TIMEOUT). Empty = default.
+  headersTimeoutMs: ""
+
+# =============================================================================
+# Database connection
+# =============================================================================
+# Non-secret connection settings rendered as plain env vars. Put credentials
+# (PGPASSWORD / POSTGRES_URL) in the existing Secret referenced below — never here.
+database:
+  # -- PostgreSQL host (PGHOST). Ignored if the Secret supplies POSTGRES_URL.
+  host: ""
+  # -- PostgreSQL port (PGPORT).
+  port: 5432
+  # -- PostgreSQL user (PGUSER). Prefer keeping this in the Secret if sensitive.
+  user: ""
+  # -- PostgreSQL database name (PGDATABASE).
+  name: ""
+  # -- Enable SSL to the database (passes --ssl).
+  ssl: false
+  # -- Max connection pool size (--pool-max). Empty = server default (10).
+  poolMax: ""
+
+# =============================================================================
+# Authentication — EXISTING SECRET (chart never creates one)
+# =============================================================================
+# Reference a Secret you manage. Its keys must already be the env var names the
+# app reads, and it is injected wholesale via `envFrom`. Useful keys:
+#   PGPASSWORD          -- database password
+#   POSTGRES_URL        -- full connection string (overrides PG* host/port/user/db)
+#   MCP_AUTH_TOKEN      -- simple bearer token (alternative to OAuth)
+#   OAUTH_ISSUER / OAUTH_AUDIENCE / OAUTH_JWKS_URI -- if you prefer OAuth from the Secret
+# Any key here overrides the plain-text values rendered from this chart.
+existingSecret:
+  # -- Name of the pre-existing Secret to inject via envFrom. REQUIRED for any
+  # credential. If empty, no Secret is mounted (only for fully public/dev setups).
+  name: ""
+  # -- Optional prefix applied to every key from the Secret (envFrom prefix).
+  prefix: ""
+
+# Optional simple bearer token auth as an ALTERNATIVE to OAuth. The token itself
+# must come from the existingSecret (key MCP_AUTH_TOKEN) — never set it in values.
+# This flag only documents intent; no value is rendered for the token.
+auth:
+  # -- Set true if you supply MCP_AUTH_TOKEN via existingSecret (informational).
+  bearerTokenEnabled: false
+
+# =============================================================================
+# OAuth 2.1 (RFC 9728 / 8414 / 7591)
+# =============================================================================
+oauth:
+  # -- Enable OAuth 2.1 (OAUTH_ENABLED). Takes precedence over bearer token.
+  enabled: false
+  # -- Authorization server / issuer URL (OAUTH_ISSUER).
+  issuer: ""
+  # -- Expected token audience (OAUTH_AUDIENCE).
+  audience: ""
+  # -- JWKS URI (OAUTH_JWKS_URI). Empty = auto-discovered from issuer.
+  jwksUri: ""
+  # -- Clock tolerance in seconds (OAUTH_CLOCK_TOLERANCE). Empty = default (60).
+  clockTolerance: ""
+
+# =============================================================================
+# Audit logging (optional)
+# =============================================================================
+audit:
+  # -- Enable the JSONL audit trail.
+  enabled: false
+  # -- Audit log destination (AUDIT_LOG_PATH). Use "stderr" to emit to container logs
+  # (recommended on Kubernetes — no PVC needed), or a file path on a mounted volume.
+  logPath: "stderr"
+  # -- Omit tool arguments from audit entries (AUDIT_REDACT).
+  redact: false
+  # -- Also log read-scoped tool calls (AUDIT_READS).
+  reads: false
+
+# -- Arbitrary extra environment variables (list of core/v1 EnvVar).
+extraEnv: []
+# -- Mount additional existing Secrets/ConfigMaps as env (list of core/v1 EnvFromSource).
+extraEnvFrom: []
+
+# =============================================================================
+# Service
+# =============================================================================
+service:
+  # -- Service type.
+  type: ClusterIP
+  # -- Service port.
+  port: 80
+  # -- Optional fixed nodePort (only when type=NodePort).
+  nodePort: ""
+  # -- Extra annotations on the Service.
+  annotations: {}
+
+# =============================================================================
+# Ingress
+# =============================================================================
+ingress:
+  # -- Enable an Ingress for /mcp.
+  enabled: false
+  # -- Ingress class name.
+  className: ""
+  # -- Ingress annotations.
+  annotations: {}
+  hosts:
+    - host: postgres-mcp.local
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- TLS configuration (list of {secretName, hosts}).
+  tls: []
+
+# =============================================================================
+# Pod Disruption Budget
+# =============================================================================
+podDisruptionBudget:
+  # -- Enable a PDB to bound voluntary disruptions during node drains/upgrades.
+  enabled: false
+  # -- Minimum available pods. Mutually exclusive with maxUnavailable.
+  minAvailable: 1
+  # -- Maximum unavailable pods. Leave empty when using minAvailable.
+  maxUnavailable: ""
+
+# =============================================================================
+# Horizontal Pod Autoscaler
+# =============================================================================
+autoscaling:
+  # -- Enable the HPA (autoscaling/v2). When enabled, replicaCount is ignored.
+  enabled: false
+  # -- Minimum replicas.
+  minReplicas: 2
+  # -- Maximum replicas.
+  maxReplicas: 5
+  # -- Target average CPU utilization (%). Empty to disable the CPU metric.
+  targetCPUUtilizationPercentage: 80
+  # -- Target average memory utilization (%). Empty to disable the memory metric.
+  targetMemoryUtilizationPercentage: ""
+  # -- Optional scaling behavior (autoscaling/v2 HPAScalingBehavior).
+  behavior: {}
+
+# =============================================================================
+# Workload tuning
+# =============================================================================
+# -- Resource requests/limits. Defaults sized for HTTP + Code Mode V8 isolate.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# -- Deployment update strategy.
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 0
+
+# -- Probes hit GET /health, which bypasses auth and rate limiting.
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+startupProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 30
+
+serviceAccount:
+  # -- Create a dedicated ServiceAccount.
+  create: true
+  # -- Name to use; generated from the fullname when empty.
+  name: ""
+  # -- ServiceAccount annotations (e.g. IRSA / Workload Identity for cloud DB IAM auth).
+  annotations: {}
+  # -- Mount the SA token. Disable if the workload never calls the Kubernetes API.
+  automountServiceAccountToken: false
+
+# -- Pod-level security context. Matches the image's non-root uid/gid 1001.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container-level security context (hardened; root FS read-only).
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1001
+  capabilities:
+    drop:
+      - ALL
+
+# -- Extra volumes (e.g. an emptyDir for /tmp when readOnlyRootFilesystem is on).
+volumes:
+  - name: tmp
+    emptyDir: {}
+# -- Extra volume mounts.
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+
+# -- Pod annotations (merged with a config checksum to trigger rollouts).
+podAnnotations: {}
+# -- Pod labels.
+podLabels: {}
+
+# -- Node selector.
+nodeSelector: {}
+# -- Tolerations.
+tolerations: []
+# -- Affinity. Empty -> a soft podAntiAffinity is applied by default (see _helpers).
+affinity: {}
+# -- Topology spread constraints.
+topologySpreadConstraints: []
+# -- Termination grace period (seconds).
+terminationGracePeriodSeconds: 30

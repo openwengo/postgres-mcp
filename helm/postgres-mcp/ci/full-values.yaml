@@ -1,0 +1,77 @@
+# CI test values: exercise every optional template (PDB, HPA, Ingress, OAuth,
+# audit, existing secret, NodePort). Used with `helm lint`/`helm template`.
+replicaCount: 3
+
+image:
+  tag: "3.1.0"
+
+server:
+  stateless: true
+  toolFilter: "core,jsonb,+pg_explain,-pg_drop_table"
+  rateLimitMax: 200
+  requestTimeoutMs: 300000
+
+database:
+  host: postgres.db.svc.cluster.local
+  port: 5432
+  user: mcp
+  name: appdb
+  ssl: true
+  poolMax: 20
+
+existingSecret:
+  name: postgres-mcp-secrets
+  prefix: ""
+
+oauth:
+  enabled: true
+  issuer: https://keycloak.example.com/realms/postgres-mcp
+  audience: postgres-mcp-client
+  clockTolerance: 90
+
+audit:
+  enabled: true
+  logPath: stderr
+  reads: true
+
+service:
+  type: NodePort
+  nodePort: 30080
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+  hosts:
+    - host: postgres-mcp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: postgres-mcp-tls
+      hosts:
+        - postgres-mcp.example.com
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 75
+  targetMemoryUtilizationPercentage: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::111122223333:role/postgres-mcp
+
+extraEnv:
+  - name: METADATA_CACHE_TTL_MS
+    value: "60000"

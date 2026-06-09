@@ -1,0 +1,30 @@
+apiVersion: v2
+name: postgres-mcp
+description: |
+  PostgreSQL MCP Server — Model Context Protocol bound to a secure PostgreSQL
+  sandbox. Deployed over Streamable HTTP transport (stateless by default),
+  with smart tool filtering, OAuth 2.1, PDB, HPA and existing-Secret support.
+type: application
+
+# Chart version. Bump on any chart change (independent of appVersion).
+version: 0.1.0
+
+# Tracks the postgres-mcp application/container image release.
+appVersion: "3.1.0"
+
+home: https://github.com/neverinfamous/postgres-mcp
+sources:
+  - https://github.com/neverinfamous/postgres-mcp
+keywords:
+  - postgresql
+  - postgres
+  - mcp
+  - model-context-protocol
+  - ai
+  - database
+maintainers:
+  - name: Adamic.tech
+    url: https://github.com/neverinfamous/postgres-mcp
+icon: https://raw.githubusercontent.com/neverinfamous/postgres-mcp/main/social-preview.jpg
+annotations:
+  category: Database
