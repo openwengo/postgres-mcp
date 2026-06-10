@@ -40,11 +40,28 @@ kubectl create secret generic postgres-mcp-secrets \
 
 ### 2. Install the chart
 
+From the published GitHub Pages Helm repository (recommended):
+
+```bash
+helm repo add postgres-mcp https://openwengo.github.io/postgres-mcp
+helm repo update
+helm install postgres-mcp postgres-mcp/postgres-mcp \
+  --set existingSecret.name=postgres-mcp-secrets \
+  --set server.toolFilter=codemode
+```
+
+Or directly from a checkout of this repo:
+
 ```bash
 helm install postgres-mcp ./helm/postgres-mcp \
   --set existingSecret.name=postgres-mcp-secrets \
   --set server.toolFilter=codemode
 ```
+
+> The Helm repository is published by the
+> [`Publish Helm Chart`](../../.github/workflows/helm-publish.yml) workflow on
+> every `vX.Y.Z` tag. The chart `version` is managed manually in `Chart.yaml`;
+> the workflow stamps `appVersion` (and thus the pulled image tag) from the tag.
 
 ## Common configurations
 

@@ -1,0 +1,103 @@
+name: Publish Helm Chart
+
+# Packages the postgres-mcp Helm chart and publishes it to a GitHub Pages
+# hosted Helm repository (served from the gh-pages branch) whenever a release
+# tag matching vX.Y.Z is pushed.
+#
+# Consumers then use:
+#   helm repo add postgres-mcp https://<owner>.github.io/postgres-mcp
+#   helm repo update
+#   helm install pg postgres-mcp/postgres-mcp
+#
+# One-time setup in repo Settings:
+#   - Settings -> Pages -> Build and deployment -> Source: "Deploy from a branch"
+#     Branch: gh-pages / (root). The branch is created automatically by the first
+#     successful run of this workflow.
+
+on:
+  push:
+    tags:
+      # Stable semver release tags only (e.g. v3.2.0). Pre-release/build-metadata
+      # tags (v3.2.0-rc.1, v3.2.0+meta) are intentionally excluded.
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: "App version to stamp into the chart appVersion (defaults to latest vX.Y.Z tag)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Package and publish chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # chart-releaser pushes to gh-pages and creates chart releases
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0 # chart-releaser needs full history to diff chart versions
+
+      - name: Install Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: v3.18.4
+
+      - name: Resolve app version from tag
+        id: appver
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.app_version }}" ]; then
+            RAW="${{ github.event.inputs.app_version }}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            RAW="${GITHUB_REF_NAME}"
+          else
+            RAW="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*')"
+          fi
+          # Strip a leading "v" -> appVersion / image tag (e.g. v3.2.0 -> 3.2.0)
+          APP_VERSION="${RAW#v}"
+          if ! printf '%s' "$APP_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Resolved app version '$APP_VERSION' is not X.Y.Z (from '$RAW')"
+            exit 1
+          fi
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved appVersion: $APP_VERSION"
+
+      - name: Stamp appVersion into Chart.yaml
+        # The chart 'version' is managed manually in Chart.yaml (independent of the
+        # app). We only sync 'appVersion' so the published chart documents and pulls
+        # the matching application image (image.tag defaults to .Chart.AppVersion).
+        run: |
+          set -euo pipefail
+          CHART=helm/postgres-mcp/Chart.yaml
+          APP_VERSION='${{ steps.appver.outputs.app_version }}'
+          # Replace the appVersion line (quoted) in-place.
+          sed -i -E "s/^appVersion: .*/appVersion: \"${APP_VERSION}\"/" "$CHART"
+          echo "----- Chart.yaml after stamping -----"
+          grep -E '^(version|appVersion):' "$CHART"
+
+      - name: Lint chart
+        run: |
+          helm lint helm/postgres-mcp
+          helm lint helm/postgres-mcp -f helm/postgres-mcp/ci/full-values.yaml
+
+      - name: Render templates (smoke test)
+        run: |
+          set -euo pipefail
+          helm template ci helm/postgres-mcp >/dev/null
+          helm template ci helm/postgres-mcp -f helm/postgres-mcp/ci/full-values.yaml >/dev/null
+
+      - name: Publish chart to gh-pages
+        uses: helm/chart-releaser-action@cae68fefc6b5f367a0275617c9f83181ba54714f # v1.7.0
+        with:
+          charts_dir: helm
+          # Skip if a chart release for this Chart.yaml 'version' already exists.
+          skip_existing: true
+        env:
+          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pages URL where the index.yaml is served from (used in the chart index).
+          CR_PAGES_URL: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
