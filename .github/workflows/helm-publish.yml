@@ -44,6 +44,13 @@ jobs:
         with:
           fetch-depth: 0 # chart-releaser needs full history to diff chart versions
 
+      - name: Configure git identity
+        # chart-releaser commits the updated index.yaml to gh-pages, which needs a
+        # git author. Runners have no default identity, so set the Actions bot.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Install Helm
         uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
         with:
