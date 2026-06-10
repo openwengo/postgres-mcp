@@ -17,13 +17,15 @@ name: Publish Helm Chart
 on:
   push:
     tags:
-      # Stable semver release tags only (e.g. v3.2.0). Pre-release/build-metadata
-      # tags (v3.2.0-rc.1, v3.2.0+meta) are intentionally excluded.
+      # Fork release tags derived from upstream's vX.Y.Z. We accept the upstream
+      # form (v3.1.0) and our SemVer pre-release fork form (v3.1.0-wengo.1), which
+      # sorts immediately after the upstream release it is based on.
       - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
   workflow_dispatch:
     inputs:
       app_version:
-        description: "App version to stamp into the chart appVersion (defaults to latest vX.Y.Z tag)"
+        description: "Version to stamp into the chart (e.g. 3.1.0 or 3.1.0-wengo.1). Defaults to the latest matching tag."
         required: false
         default: ""
 
@@ -47,7 +49,7 @@ jobs:
         with:
           version: v3.18.4
 
-      - name: Resolve app version from tag
+      - name: Resolve versions from tag
         id: appver
         run: |
           set -euo pipefail
@@ -58,27 +60,40 @@ jobs:
           else
             RAW="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*')"
           fi
-          # Strip a leading "v" -> appVersion / image tag (e.g. v3.2.0 -> 3.2.0)
+          # Strip an optional leading "v" -> full app version.
+          # Accepts upstream X.Y.Z and fork pre-releases X.Y.Z-wengo.N (SemVer 2).
           APP_VERSION="${RAW#v}"
-          if ! printf '%s' "$APP_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Resolved app version '$APP_VERSION' is not X.Y.Z (from '$RAW')"
+          SEMVER='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+          if ! printf '%s' "$APP_VERSION" | grep -Eq "$SEMVER"; then
+            echo "::error::Version '$APP_VERSION' (from '$RAW') is not X.Y.Z or X.Y.Z-<pre>"
             exit 1
           fi
+          # Upstream image base = the X.Y.Z part before any "-pre" suffix. The fork
+          # pre-release suffix (e.g. -wengo.1) marks a chart/packaging change on top
+          # of an upstream image that is published as plain X.Y.Z.
+          IMAGE_TAG="${APP_VERSION%%-*}"
           echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Resolved appVersion: $APP_VERSION"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved appVersion: $APP_VERSION (image base: $IMAGE_TAG)"
 
-      - name: Stamp appVersion into Chart.yaml
+      - name: Stamp versions into the chart
         # The chart 'version' is managed manually in Chart.yaml (independent of the
-        # app). We only sync 'appVersion' so the published chart documents and pulls
-        # the matching application image (image.tag defaults to .Chart.AppVersion).
+        # app). We stamp 'appVersion' to the full tag (documents what is deployed)
+        # and pin image.tag to the upstream X.Y.Z base so a real, published image is
+        # pulled even when the tag carries a fork pre-release suffix.
         run: |
           set -euo pipefail
           CHART=helm/postgres-mcp/Chart.yaml
+          VALUES=helm/postgres-mcp/values.yaml
           APP_VERSION='${{ steps.appver.outputs.app_version }}'
-          # Replace the appVersion line (quoted) in-place.
+          IMAGE_TAG='${{ steps.appver.outputs.image_tag }}'
           sed -i -E "s/^appVersion: .*/appVersion: \"${APP_VERSION}\"/" "$CHART"
-          echo "----- Chart.yaml after stamping -----"
+          # Set the default image tag (the `tag: ""` line under image:).
+          sed -i -E "s/^(  tag:) .*/\1 \"${IMAGE_TAG}\"/" "$VALUES"
+          echo "----- Chart.yaml -----"
           grep -E '^(version|appVersion):' "$CHART"
+          echo "----- values.yaml image.tag -----"
+          grep -nE '^  tag:' "$VALUES"
 
       - name: Lint chart
         run: |

@@ -60,8 +60,12 @@ helm install postgres-mcp ./helm/postgres-mcp \
 
 > The Helm repository is published by the
 > [`Publish Helm Chart`](../../.github/workflows/helm-publish.yml) workflow on
-> every `vX.Y.Z` tag. The chart `version` is managed manually in `Chart.yaml`;
-> the workflow stamps `appVersion` (and thus the pulled image tag) from the tag.
+> release tags. Tags follow upstream's `vX.Y.Z`, with fork releases tagged as a
+> SemVer pre-release `vX.Y.Z-wengo.N` (e.g. `v3.1.0-wengo.1`) so they sort right
+> after the upstream release they are based on. The chart `version` is managed
+> manually in `Chart.yaml`; the workflow stamps `appVersion` from the full tag
+> and pins the image to the upstream `X.Y.Z` base, so a real published image is
+> pulled even for fork pre-release tags.
 
 ## Common configurations
 
