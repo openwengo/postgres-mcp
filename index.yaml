@@ -1,0 +1,32 @@
+apiVersion: v1
+entries:
+  postgres-mcp:
+  - annotations:
+      category: Database
+    apiVersion: v2
+    appVersion: 3.1.0-wengo.1
+    created: "2026-06-10T10:58:45.976759745Z"
+    description: 'PostgreSQL MCP Server — Model Context Protocol bound to a secure
+      PostgreSQL sandbox. Deployed over Streamable HTTP transport (stateless by default),
+      with smart tool filtering, OAuth 2.1, PDB, HPA and existing-Secret support. '
+    digest: 9fb13d97aade739569bdce29f61edf2574735472d5aacfcb0fbc21f2e589a42d
+    home: https://github.com/neverinfamous/postgres-mcp
+    icon: https://raw.githubusercontent.com/neverinfamous/postgres-mcp/main/social-preview.jpg
+    keywords:
+    - postgresql
+    - postgres
+    - mcp
+    - model-context-protocol
+    - ai
+    - database
+    maintainers:
+    - name: Adamic.tech
+      url: https://github.com/neverinfamous/postgres-mcp
+    name: postgres-mcp
+    sources:
+    - https://github.com/neverinfamous/postgres-mcp
+    type: application
+    urls:
+    - https://github.com/openwengo/postgres-mcp/releases/download/postgres-mcp-0.1.0/postgres-mcp-0.1.0.tgz
+    version: 0.1.0
+generated: "2026-06-10T10:58:45.97677287Z"
